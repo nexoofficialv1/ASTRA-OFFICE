@@ -1,13 +1,16 @@
 name: astra_office
 description: Offline-first office suite MVP by ASTRA.
 publish_to: 'none'
-version: 0.2.0+3
+version: 0.3.0+5
 environment:
   sdk: '>=3.4.0 <4.0.0'
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   cupertino_icons: ^1.0.8
+  flutter_quill: 11.5.0
   file_picker: 10.3.8
   path_provider: ^2.1.4
   shared_preferences: ^2.3.2
