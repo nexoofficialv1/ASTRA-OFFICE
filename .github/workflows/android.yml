@@ -13,6 +13,10 @@ jobs:
           channel: stable
       - run: flutter create . --platforms=android --org com.astra.office --project-name astra_office
       - run: rm -rf test
+      - name: Force Android compileSdk 36
+        run: |
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
+          grep -n "compileSdk" android/app/build.gradle.kts
       - run: flutter pub get
       - run: flutter analyze
       - run: if [ -d test ]; then flutter test; else echo 'No tests yet - skipping'; fi
