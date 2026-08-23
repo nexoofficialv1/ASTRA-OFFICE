@@ -41,8 +41,9 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
   bool _printLayout = true;
   bool _fitPageWidth = true;
 
-  static const navy = Color(0xFF071A38);
-  static const accent = Color(0xFF1769C2);
+  static const wordBlue = Color(0xFF185ABD);
+  static const wordBlueDark = Color(0xFF114B98);
+  static const accent = Color(0xFF185ABD);
 
   @override
   void initState() {
@@ -656,6 +657,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
+        var expandedPanel = false;
         return DefaultTabController(
           length: 8,
           child: StatefulBuilder(
@@ -663,20 +665,21 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
               void refresh() => setSheetState(() {});
 
               return SizedBox(
-                height: MediaQuery.of(context).size.height * 0.78,
+                height: MediaQuery.of(context).size.height *
+                    (expandedPanel ? 0.80 : 0.50),
                 child: Column(
                   children: [
                     Container(
-                      height: 5,
-                      width: 46,
-                      margin: const EdgeInsets.only(top: 8, bottom: 5),
+                      height: 4,
+                      width: 40,
+                      margin: const EdgeInsets.only(top: 6, bottom: 2),
                       decoration: BoxDecoration(
                         color: Colors.black26,
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 3, 8, 4),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 6, 0),
                       child: Row(
                         children: [
                           const Expanded(
@@ -685,14 +688,32 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
                               style: TextStyle(
                                 color: Colors.black87,
                                 fontWeight: FontWeight.w700,
-                                fontSize: 16,
+                                fontSize: 14,
                               ),
                             ),
                           ),
                           IconButton(
+                            tooltip: expandedPanel
+                                ? 'Compact panel'
+                                : 'Expand panel',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () {
+                              setSheetState(() {
+                                expandedPanel = !expandedPanel;
+                              });
+                            },
+                            icon: Icon(
+                              expandedPanel
+                                  ? Icons.unfold_less_rounded
+                                  : Icons.unfold_more_rounded,
+                              size: 21,
+                            ),
+                          ),
+                          IconButton(
                             tooltip: 'Close',
+                            visualDensity: VisualDensity.compact,
                             onPressed: () => Navigator.pop(sheetContext),
-                            icon: const Icon(Icons.close_rounded),
+                            icon: const Icon(Icons.close_rounded, size: 21),
                           ),
                         ],
                       ),
@@ -703,8 +724,14 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
                       tabAlignment: TabAlignment.start,
                       labelColor: Colors.black87,
                       unselectedLabelColor: Colors.black54,
+                      labelStyle: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      unselectedLabelStyle: TextStyle(fontSize: 12),
                       indicatorColor: accent,
-                      indicatorWeight: 3,
+                      indicatorWeight: 2.5,
+                      dividerHeight: 0,
                       tabs: [
                         Tab(text: 'Home'),
                         Tab(text: 'Insert'),
@@ -1292,7 +1319,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
             refresh();
           },
           child: Container(
-            height: 76,
+            height: 48,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: active ? const Color(0xFFF0F0F0) : Colors.white,
@@ -1303,7 +1330,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.black87,
-                fontSize: level == 1 ? 17 : 14,
+                fontSize: level == 1 ? 13 : 11.5,
                 fontWeight: level == null ? FontWeight.w400 : FontWeight.w700,
               ),
             ),
@@ -1313,7 +1340,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           styleButton('Heading\n1', 1),
@@ -1337,8 +1364,11 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
     ];
 
     return ListTile(
-      leading: const Icon(Icons.font_download_outlined, size: 34),
-      title: const Text('Font'),
+      dense: true,
+      visualDensity: const VisualDensity(vertical: -3),
+      minLeadingWidth: 26,
+      leading: const Icon(Icons.font_download_outlined, size: 24),
+      title: const Text('Font', style: TextStyle(fontSize: 12)),
       trailing: DropdownButton<String>(
         value: fonts.contains(_fontLabel) ? _fontLabel : 'Default',
         underline: const SizedBox.shrink(),
@@ -1364,8 +1394,11 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
 
   Widget _fontSizeRow(VoidCallback refresh) {
     return ListTile(
-      leading: const Icon(Icons.format_size_rounded, size: 34),
-      title: const Text('Font Size'),
+      dense: true,
+      visualDensity: const VisualDensity(vertical: -3),
+      minLeadingWidth: 26,
+      leading: const Icon(Icons.format_size_rounded, size: 24),
+      title: const Text('Font Size', style: TextStyle(fontSize: 12)),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1377,8 +1410,8 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
             icon: const Icon(Icons.remove_rounded),
           ),
           Container(
-            width: 58,
-            height: 48,
+            width: 48,
+            height: 36,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: const Color(0xFFF1F1F1),
@@ -1386,7 +1419,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
             ),
             child: Text(
               _fontSize.toInt().toString(),
-              style: const TextStyle(fontSize: 18),
+              style: const TextStyle(fontSize: 14),
             ),
           ),
           IconButton(
@@ -1411,7 +1444,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
     ];
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: colors.map((color) {
@@ -1429,7 +1462,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
                 'A',
                 style: TextStyle(
                   color: color,
-                  fontSize: 36,
+                  fontSize: 27,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -1452,14 +1485,14 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
       child: InkWell(
         onTap: onTap,
         child: Container(
-          height: 88,
+          height: 54,
           alignment: Alignment.center,
           color: selected ? const Color(0xFFE9F2FF) : Colors.white,
           child: Text(
             label,
             style: TextStyle(
               color: Colors.black87,
-              fontSize: 34,
+              fontSize: 26,
               fontWeight: fontWeight,
               fontStyle: fontStyle,
               decoration: decoration,
@@ -1475,8 +1508,8 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-          height: 88,
-          child: Icon(icon, color: Colors.black87, size: 32),
+          height: 54,
+          child: Icon(icon, color: Colors.black87, size: 25),
         ),
       ),
     );
@@ -1484,19 +1517,19 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
 
   Widget _paneList(List<Widget> children) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 28),
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 18),
       children: children,
     );
   }
 
   Widget _sectionTitle(String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 10, 4, 8),
+      padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
       child: Text(
         title,
         style: const TextStyle(
           color: Colors.black54,
-          fontSize: 15,
+          fontSize: 12.5,
           fontWeight: FontWeight.w500,
         ),
       ),
@@ -1507,7 +1540,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(11),
         border: Border.all(color: const Color(0xFFE4E4E4)),
       ),
       clipBehavior: Clip.antiAlias,
@@ -1524,18 +1557,18 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-          height: 90,
+          height: 62,
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, color: accent, size: 27),
-              const SizedBox(height: 7),
+              Icon(icon, color: accent, size: 21),
+              const SizedBox(height: 4),
               Text(
                 label,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: Colors.black87,
-                  fontSize: 11,
+                  fontSize: 9.5,
                 ),
               ),
             ],
@@ -1554,21 +1587,21 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        width: 102,
-        height: 72,
+        width: 82,
+        height: 56,
         padding: const EdgeInsets.symmetric(horizontal: 4),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: accent, size: 24),
-            const SizedBox(height: 5),
+            Icon(icon, color: accent, size: 20),
+            const SizedBox(height: 3),
             Text(
               label,
               maxLines: 2,
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.black87,
-                fontSize: 10,
+                fontSize: 9,
               ),
             ),
           ],
@@ -1580,22 +1613,22 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
   Widget _groupGrid(List<_Cmd> commands) {
     return _card(
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: 3),
         child: Wrap(
           alignment: WrapAlignment.start,
           spacing: 0,
           runSpacing: 0,
           children: commands.map((command) {
             return SizedBox(
-              width: 108,
-              height: 88,
+              width: 84,
+              height: 62,
               child: InkWell(
                 onTap: command.onTap,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(command.icon, color: accent, size: 27),
-                    const SizedBox(height: 7),
+                    Icon(command.icon, color: accent, size: 21),
+                    const SizedBox(height: 3),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: Text(
@@ -1605,7 +1638,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.black87,
-                          fontSize: 10.5,
+                          fontSize: 9,
                         ),
                       ),
                     ),
@@ -1627,8 +1660,10 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
     ValueChanged<String> onChanged,
   ) {
     return ListTile(
-      leading: Icon(icon),
-      title: Text(label),
+      dense: true,
+      visualDensity: const VisualDensity(vertical: -3),
+      leading: Icon(icon, size: 21),
+      title: Text(label, style: const TextStyle(fontSize: 12)),
       trailing: DropdownButton<String>(
         value: value,
         underline: const SizedBox.shrink(),
@@ -1742,28 +1777,44 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      backgroundColor: const Color(0xFF06152F),
+      backgroundColor: const Color(0xFFF1F1F1),
       appBar: AppBar(
-        title: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        backgroundColor: wordBlue,
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        titleSpacing: 4,
+        title: Row(
+          children: [
+            const _AstraOfficeMark(size: 27),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(
             tooltip: 'Keyboard',
             onPressed: _focusEditor,
-            icon: const Icon(Icons.keyboard_rounded),
+            icon: const Icon(Icons.keyboard_rounded, size: 21),
           ),
           IconButton(
             tooltip: 'Document tools',
             onPressed: _showWordRibbon,
-            icon: const Icon(Icons.text_format_rounded),
+            icon: const Icon(Icons.text_format_rounded, size: 21),
           ),
           IconButton(
             tooltip: 'Save',
             onPressed: _quickSave,
-            icon: const Icon(Icons.save_rounded),
+            icon: const Icon(Icons.save_rounded, size: 21),
           ),
           PopupMenuButton<String>(
             tooltip: 'File',
@@ -1814,8 +1865,8 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
                   ),
                 Expanded(child: _documentCanvas()),
                 Container(
-                  height: 38,
-                  color: navy,
+                  height: 34,
+                  color: wordBlueDark,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Row(
                     children: [
@@ -1858,6 +1909,68 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+
+class _AstraOfficeMark extends StatelessWidget {
+  final double size;
+
+  const _AstraOfficeMark({this.size = 28});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(size * .22),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Positioned(
+            left: size * .08,
+            top: size * .08,
+            bottom: size * .08,
+            width: size * .42,
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF7A00),
+                borderRadius: BorderRadius.circular(size * .16),
+              ),
+            ),
+          ),
+          Positioned(
+            left: size * .22,
+            top: size * .06,
+            bottom: size * .02,
+            width: size * .30,
+            child: Transform.rotate(
+              angle: -0.35,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00B7FF),
+                  borderRadius: BorderRadius.circular(size * .12),
+                ),
+              ),
+            ),
+          ),
+          Center(
+            child: Text(
+              'A',
+              style: TextStyle(
+                color: wordBlue,
+                fontWeight: FontWeight.w900,
+                fontSize: size * .58,
+                height: 1,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
