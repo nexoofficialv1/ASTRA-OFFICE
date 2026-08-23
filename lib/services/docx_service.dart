@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:archive/archive_io.dart';
 import 'package:xml/xml.dart';
 
@@ -8,7 +9,7 @@ class DocxService {
     final archive = ZipDecoder().decodeBytes(bytes);
     final doc = archive.findFile('word/document.xml');
     if (doc == null) throw Exception('Invalid DOCX: word/document.xml missing');
-    final xml = XmlDocument.parse(String.fromCharCodes(doc.content as List<int>));
+    final xml = XmlDocument.parse(utf8.decode(doc.content as List<int>));
     final paragraphs = xml.findAllElements('w:p').map((p) {
       return p.findAllElements('w:t').map((t) => t.innerText).join();
     }).toList();
@@ -23,7 +24,7 @@ class DocxService {
     final doc = archive.findFile('word/document.xml');
     if (doc == null) throw Exception('Invalid DOCX');
 
-    final xml = XmlDocument.parse(String.fromCharCodes(doc.content as List<int>));
+    final xml = XmlDocument.parse(utf8.decode(doc.content as List<int>));
     final body = xml.findAllElements('w:body').first;
     final bodyChildren = body.children.toList();
     for (final node in bodyChildren) {
@@ -39,7 +40,7 @@ class DocxService {
       body.children.insert(0, p);
     }
 
-    final replacement = ArchiveFile('word/document.xml', xml.toXmlString().length, xml.toXmlString().codeUnits);
+    final replacement = ArchiveFile('word/document.xml', xml.toXmlString().length, utf8.encode(xml.toXmlString()));
     archive.files.removeWhere((f) => f.name == 'word/document.xml');
     archive.addFile(replacement);
     final out = ZipEncoder().encode(archive);
