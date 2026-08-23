@@ -20,3 +20,4 @@ Offline-first Flutter office-suite bootstrap.
 - Bengali localization
 
 This project intentionally warns when advanced Office formatting cannot be preserved.
+
