@@ -1962,7 +1962,7 @@ class _AstraOfficeMark extends StatelessWidget {
             child: Text(
               'A',
               style: TextStyle(
-                color: wordBlue,
+                color: const Color(0xFF185ABD),
                 fontWeight: FontWeight.w900,
                 fontSize: size * .58,
                 height: 1,
