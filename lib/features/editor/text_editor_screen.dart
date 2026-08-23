@@ -26,10 +26,10 @@ class TextEditorScreen extends StatefulWidget {
   State<TextEditorScreen> createState() => _TextEditorScreenState();
 }
 
-class _TextEditorScreenState extends State<TextEditorScreen>
-    with SingleTickerProviderStateMixin {
+class _TextEditorScreenState extends State<TextEditorScreen> {
   late QuillController _controller;
-  late TabController _tabs;
+  late FocusNode _editorFocusNode;
+  late ScrollController _editorScrollController;
 
   bool _loading = true;
   String? _sourcePath;
@@ -42,15 +42,18 @@ class _TextEditorScreenState extends State<TextEditorScreen>
   bool _fitPageWidth = true;
 
   static const navy = Color(0xFF071A38);
-  static const panel = Color(0xFF0D2449);
-  static const accent = Color(0xFF79AEFF);
+  static const accent = Color(0xFF1769C2);
 
   @override
   void initState() {
     super.initState();
+    _editorFocusNode = FocusNode(debugLabel: 'ASTRA document editor');
+    _editorScrollController = ScrollController();
     _controller = QuillController.basic();
     _controller.addListener(_onEditorChanged);
-    _tabs = TabController(length: 5, vsync: this);
+
+    // New documents should always start with readable black text.
+    _controller.formatSelection(const ColorAttribute('#000000'));
     _load();
   }
 
@@ -58,7 +61,8 @@ class _TextEditorScreenState extends State<TextEditorScreen>
   void dispose() {
     _controller.removeListener(_onEditorChanged);
     _controller.dispose();
-    _tabs.dispose();
+    _editorFocusNode.dispose();
+    _editorScrollController.dispose();
     super.dispose();
   }
 
@@ -75,26 +79,47 @@ class _TextEditorScreenState extends State<TextEditorScreen>
       if (widget.path != null) {
         final sidecar = File(sidecarPath(widget.path!));
         Document document;
+        var loadedRichSidecar = false;
 
         if (await sidecar.exists()) {
           final raw = await sidecar.readAsString();
           final data = jsonDecode(raw) as List<dynamic>;
           document = Document.fromJson(data);
+          loadedRichSidecar = true;
         } else {
           final text = widget.isDocx
               ? await DocxService().readPlainText(widget.path!)
               : await File(widget.path!).readAsString();
+
           document = Document();
-          if (text.isNotEmpty) document.insert(0, text);
+          if (text.isNotEmpty) {
+            document.insert(0, text);
+          }
         }
 
         _controller.removeListener(_onEditorChanged);
         _controller.dispose();
+
         _controller = QuillController(
           document: document,
           selection: const TextSelection.collapsed(offset: 0),
         );
         _controller.addListener(_onEditorChanged);
+
+        // Plain imports have no preserved rich color information yet.
+        // Force them to readable black. Sidecar-rich documents keep their colors.
+        if (!loadedRichSidecar) {
+          final contentLength = math.max(0, document.length - 1);
+          if (contentLength > 0) {
+            _controller.formatText(
+              0,
+              contentLength,
+              const ColorAttribute('#000000'),
+            );
+          }
+          _controller.moveCursorToEnd();
+          _controller.formatSelection(const ColorAttribute('#000000'));
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -105,6 +130,16 @@ class _TextEditorScreenState extends State<TextEditorScreen>
     }
 
     if (mounted) setState(() => _loading = false);
+  }
+
+  void _focusEditor() {
+    if (!_editorFocusNode.hasFocus) {
+      FocusScope.of(context).requestFocus(_editorFocusNode);
+    }
+    Future<void>.delayed(const Duration(milliseconds: 80), () async {
+      if (!mounted || !_editorFocusNode.hasFocus) return;
+      await SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    });
   }
 
   Future<void> _saveRichSidecar(String path) async {
@@ -132,7 +167,7 @@ class _TextEditorScreenState extends State<TextEditorScreen>
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Native new-DOCX package creation is part of the DOCX round-trip engine milestone.',
+                'Native new-DOCX creation requires the DOCX round-trip engine, which is the next core-engine milestone.',
               ),
             ),
           );
@@ -201,6 +236,7 @@ class _TextEditorScreenState extends State<TextEditorScreen>
     final current = _style[attribute.key];
     final active = current != null &&
         (attribute.value == null || current.value == attribute.value);
+
     _controller.formatSelection(
       active ? Attribute.clone(attribute, null) : attribute,
     );
@@ -225,14 +261,16 @@ class _TextEditorScreenState extends State<TextEditorScreen>
       'align',
       'list',
       'indent',
+      'line-height',
     ];
     for (final key in keys) {
       _controller.formatSelection(Attribute.fromKeyValue(key, null));
     }
+    _controller.formatSelection(const ColorAttribute('#000000'));
   }
 
   String get _fontLabel =>
-      _style[Attribute.font.key]?.value?.toString() ?? 'Font';
+      _style[Attribute.font.key]?.value?.toString() ?? 'Default';
 
   double get _fontSize {
     final value = _style[Attribute.size.key]?.value;
@@ -244,7 +282,7 @@ class _TextEditorScreenState extends State<TextEditorScreen>
       if (value == 'large') return 18;
       if (value == 'huge') return 28;
     }
-    return 14;
+    return 12;
   }
 
   void _changeFontSize(double delta) {
@@ -256,18 +294,15 @@ class _TextEditorScreenState extends State<TextEditorScreen>
     final text = _controller.getPlainText();
     if (text.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Copied')),
-      );
-    }
   }
 
   Future<void> _cut() async {
     final selection = _controller.selection;
     if (selection.isCollapsed) return;
+
     final text = _controller.getPlainText();
     await Clipboard.setData(ClipboardData(text: text));
+
     _controller.replaceText(
       selection.start,
       selection.end - selection.start,
@@ -331,15 +366,20 @@ class _TextEditorScreenState extends State<TextEditorScreen>
         ],
       ),
     );
+    url.dispose();
     if (result == null || result.isEmpty) return;
     _setAttr(Attribute.link.key, result);
   }
 
   Future<void> _insertSymbol() async {
-    const symbols = ['©', '®', '™', '₹', '€', '£', '°', '±', '×', '÷', '✓', '•'];
+    const symbols = [
+      '©', '®', '™', '₹', '€', '£', '°', '±', '×', '÷', '✓', '•',
+      '→', '←', '↑', '↓', '∞', '≈', '≠', '≤', '≥', 'π', 'Ω', '§'
+    ];
+
     final symbol = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: navy,
+      backgroundColor: Colors.white,
       builder: (_) => SafeArea(
         child: GridView.count(
           shrinkWrap: true,
@@ -353,8 +393,8 @@ class _TextEditorScreenState extends State<TextEditorScreen>
                     child: Text(
                       s,
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 26,
+                        color: Colors.black87,
+                        fontSize: 25,
                       ),
                     ),
                   ),
@@ -364,6 +404,7 @@ class _TextEditorScreenState extends State<TextEditorScreen>
         ),
       ),
     );
+
     if (symbol != null) _insertText(symbol);
   }
 
@@ -400,20 +441,17 @@ class _TextEditorScreenState extends State<TextEditorScreen>
         actions: [
           TextButton(
             onPressed: () {
-              final query = find.text;
-              if (query.isNotEmpty) _findNext(query);
+              if (find.text.isNotEmpty) _findNext(find.text);
             },
             child: const Text('Find next'),
           ),
           FilledButton(
             onPressed: () {
-              final query = find.text;
-              if (query.isNotEmpty) {
-                final count = _replaceAll(query, replace.text);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Replaced $count occurrence(s)')),
-                );
-              }
+              if (find.text.isEmpty) return;
+              final count = _replaceAll(find.text, replace.text);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Replaced $count occurrence(s)')),
+              );
             },
             child: const Text('Replace all'),
           ),
@@ -433,8 +471,10 @@ class _TextEditorScreenState extends State<TextEditorScreen>
     final plain = _controller.document.toPlainText();
     if (plain.isEmpty) return;
 
-    var start = _controller.selection.end;
-    var index = plain.toLowerCase().indexOf(query.toLowerCase(), start);
+    var index = plain
+        .toLowerCase()
+        .indexOf(query.toLowerCase(), _controller.selection.end);
+
     if (index < 0) {
       index = plain.toLowerCase().indexOf(query.toLowerCase());
     }
@@ -462,6 +502,7 @@ class _TextEditorScreenState extends State<TextEditorScreen>
 
     final positions = <int>[];
     var offset = 0;
+
     while (true) {
       final index = lower.indexOf(needle, offset);
       if (index < 0) break;
@@ -486,46 +527,44 @@ class _TextEditorScreenState extends State<TextEditorScreen>
         ? 0
         : text.split(RegExp(r'\s+')).where((e) => e.isNotEmpty).length;
     final chars = text.length;
-    final paragraphs =
-        text.isEmpty ? 0 : text.split(RegExp(r'\n+')).where((e) => e.trim().isNotEmpty).length;
+    final paragraphs = text.isEmpty
+        ? 0
+        : text
+            .split(RegExp(r'\n+'))
+            .where((e) => e.trim().isNotEmpty)
+            .length;
 
-    showModalBottomSheet(
+    showDialog<void>(
       context: context,
-      backgroundColor: navy,
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(22),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _metric('Words', '$words'),
-              _metric('Characters', '$chars'),
-              _metric('Paragraphs', '$paragraphs'),
-            ],
-          ),
+      builder: (_) => AlertDialog(
+        title: const Text('Word Count'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _countRow('Words', words),
+            _countRow('Characters', chars),
+            _countRow('Paragraphs', paragraphs),
+          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _metric(String label, String value) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 23,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white60, fontSize: 11),
-        ),
-      ],
+  Widget _countRow(String label, int value) {
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      title: Text(label),
+      trailing: Text(
+        '$value',
+        style: const TextStyle(fontWeight: FontWeight.w800),
+      ),
     );
   }
 
@@ -545,6 +584,7 @@ class _TextEditorScreenState extends State<TextEditorScreen>
         ],
       ),
     );
+
     return document.save();
   }
 
@@ -569,7 +609,11 @@ class _TextEditorScreenState extends State<TextEditorScreen>
 
   void _coming(String feature) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$feature: native document engine work is next.')),
+      SnackBar(
+        content: Text(
+          '$feature is present in the Word command shell; native implementation is being added in the editor-engine phases.',
+        ),
+      ),
     );
   }
 
@@ -599,88 +643,1007 @@ class _TextEditorScreenState extends State<TextEditorScreen>
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final title = widget.path == null
-        ? 'New Document'
-        : widget.path!.split('/').last;
+  Future<void> _showWordRibbon() async {
+    FocusScope.of(context).unfocus();
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF06152F),
-      appBar: AppBar(
-        title: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Undo',
-            onPressed: _controller.hasUndo ? _controller.undo : null,
-            icon: const Icon(Icons.undo_rounded),
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.white,
+      barrierColor: Colors.black38,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return DefaultTabController(
+          length: 8,
+          child: StatefulBuilder(
+            builder: (context, setSheetState) {
+              void refresh() => setSheetState(() {});
+
+              return SizedBox(
+                height: MediaQuery.of(context).size.height * 0.78,
+                child: Column(
+                  children: [
+                    Container(
+                      height: 5,
+                      width: 46,
+                      margin: const EdgeInsets.only(top: 8, bottom: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.black26,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 3, 8, 4),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Document Tools',
+                              style: TextStyle(
+                                color: Colors.black87,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: () => Navigator.pop(sheetContext),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    const TabBar(
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
+                      labelColor: Colors.black87,
+                      unselectedLabelColor: Colors.black54,
+                      indicatorColor: accent,
+                      indicatorWeight: 3,
+                      tabs: [
+                        Tab(text: 'Home'),
+                        Tab(text: 'Insert'),
+                        Tab(text: 'Design'),
+                        Tab(text: 'Layout'),
+                        Tab(text: 'References'),
+                        Tab(text: 'Mailings'),
+                        Tab(text: 'Review'),
+                        Tab(text: 'View'),
+                      ],
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          _homePane(refresh),
+                          _insertPane(refresh),
+                          _designPane(refresh),
+                          _layoutPane(refresh),
+                          _referencesPane(),
+                          _mailingsPane(),
+                          _reviewPane(refresh),
+                          _viewPane(refresh, sheetContext),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
-          IconButton(
-            tooltip: 'Save',
-            onPressed: _quickSave,
-            icon: const Icon(Icons.save_rounded),
-          ),
-          IconButton(
-            tooltip: 'Save as',
-            onPressed: _saveAs,
-            icon: const Icon(Icons.save_as_rounded),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabs,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          tabs: const [
-            Tab(text: 'Home'),
-            Tab(text: 'Insert'),
-            Tab(text: 'Layout'),
-            Tab(text: 'View'),
-            Tab(text: 'Review'),
+        );
+      },
+    );
+  }
+
+  Widget _homePane(VoidCallback refresh) {
+    return _paneList([
+      _sectionTitle('Font Format'),
+      _card(
+        child: Column(
+          children: [
+            Row(
+              children: [
+                _bigFormatButton(
+                  'B',
+                  _isActive(Attribute.bold),
+                  () {
+                    _toggle(Attribute.bold);
+                    refresh();
+                  },
+                  fontWeight: FontWeight.w900,
+                ),
+                _bigFormatButton(
+                  'I',
+                  _isActive(Attribute.italic),
+                  () {
+                    _toggle(Attribute.italic);
+                    refresh();
+                  },
+                  fontStyle: FontStyle.italic,
+                ),
+                _bigFormatButton(
+                  'U',
+                  _isActive(Attribute.underline),
+                  () {
+                    _toggle(Attribute.underline);
+                    refresh();
+                  },
+                  decoration: TextDecoration.underline,
+                ),
+                _bigFormatButton(
+                  'ab',
+                  _isActive(Attribute.strikeThrough),
+                  () {
+                    _toggle(Attribute.strikeThrough);
+                    refresh();
+                  },
+                  decoration: TextDecoration.lineThrough,
+                ),
+                _bigFormatButton(
+                  'x²',
+                  _isActive(Attribute.superscript),
+                  () {
+                    _toggle(Attribute.superscript);
+                    refresh();
+                  },
+                ),
+                _iconFormatButton(
+                  Icons.more_horiz_rounded,
+                  () => _showMoreFontCommands(refresh),
+                ),
+              ],
+            ),
+            const Divider(height: 1),
+            _stylesRow(refresh),
+            const Divider(height: 1),
+            _fontFamilyRow(refresh),
+            const Divider(height: 1),
+            _fontSizeRow(refresh),
+            const Divider(height: 1),
+            _fontColorsRow(refresh),
           ],
         ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                SizedBox(
-                  height: 118,
-                  child: TabBarView(
-                    controller: _tabs,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: [
-                      _homeRibbon(),
-                      _insertRibbon(),
-                      _layoutRibbon(),
-                      _viewRibbon(),
-                      _reviewRibbon(),
-                    ],
-                  ),
+      _sectionTitle('Clipboard'),
+      _card(
+        child: Row(
+          children: [
+            _commandCell(Icons.content_paste_rounded, 'Paste', _paste),
+            _commandCell(Icons.content_cut_rounded, 'Cut', _cut),
+            _commandCell(Icons.copy_rounded, 'Copy', _copy),
+            _commandCell(
+              Icons.format_paint_rounded,
+              'Format Painter',
+              () => _coming('Format Painter'),
+            ),
+          ],
+        ),
+      ),
+      _sectionTitle('Paragraph'),
+      _card(
+        child: Wrap(
+          spacing: 3,
+          runSpacing: 3,
+          children: [
+            _smallCommand(Icons.format_list_bulleted_rounded, 'Bullets', () {
+              _toggle(Attribute.ul);
+              refresh();
+            }),
+            _smallCommand(Icons.format_list_numbered_rounded, 'Numbering', () {
+              _toggle(Attribute.ol);
+              refresh();
+            }),
+            _smallCommand(
+              Icons.format_indent_decrease_rounded,
+              'Decrease indent',
+              () => _controller.indentSelection(false),
+            ),
+            _smallCommand(
+              Icons.format_indent_increase_rounded,
+              'Increase indent',
+              () => _controller.indentSelection(true),
+            ),
+            _smallCommand(Icons.format_align_left_rounded, 'Left', () {
+              _setAttr(Attribute.align.key, null);
+              refresh();
+            }),
+            _smallCommand(Icons.format_align_center_rounded, 'Center', () {
+              _setAttr(Attribute.align.key, 'center');
+              refresh();
+            }),
+            _smallCommand(Icons.format_align_right_rounded, 'Right', () {
+              _setAttr(Attribute.align.key, 'right');
+              refresh();
+            }),
+            _smallCommand(Icons.format_align_justify_rounded, 'Justify', () {
+              _setAttr(Attribute.align.key, 'justify');
+              refresh();
+            }),
+            _smallCommand(
+              Icons.format_line_spacing_rounded,
+              'Line spacing',
+              () => _showLineSpacing(refresh),
+            ),
+            _smallCommand(
+              Icons.border_all_rounded,
+              'Borders',
+              () => _coming('Paragraph Borders'),
+            ),
+            _smallCommand(
+              Icons.format_color_fill_rounded,
+              'Shading',
+              () => _coming('Paragraph Shading'),
+            ),
+          ],
+        ),
+      ),
+      _sectionTitle('Editing'),
+      _card(
+        child: Row(
+          children: [
+            _commandCell(Icons.search_rounded, 'Find', _findReplaceDialog),
+            _commandCell(Icons.find_replace_rounded, 'Replace', _findReplaceDialog),
+            _commandCell(Icons.select_all_rounded, 'Select', _selectAll),
+          ],
+        ),
+      ),
+    ]);
+  }
+
+  Widget _insertPane(VoidCallback refresh) {
+    return _paneList([
+      _sectionTitle('Pages'),
+      _groupGrid([
+        _Cmd(Icons.note_add_outlined, 'Cover Page', () => _coming('Cover Page')),
+        _Cmd(Icons.insert_page_break_rounded, 'Blank Page', () => _coming('Blank Page')),
+        _Cmd(Icons.horizontal_rule_rounded, 'Page Break', () => _coming('Page Break')),
+      ]),
+      _sectionTitle('Tables'),
+      _groupGrid([
+        _Cmd(Icons.table_chart_rounded, 'Table', () => _coming('Table')),
+      ]),
+      _sectionTitle('Illustrations'),
+      _groupGrid([
+        _Cmd(Icons.image_outlined, 'Pictures', () => _coming('Pictures')),
+        _Cmd(Icons.photo_camera_outlined, 'Camera', () => _coming('Camera Picture')),
+        _Cmd(Icons.category_outlined, 'Shapes', () => _coming('Shapes')),
+        _Cmd(Icons.insert_chart_outlined, 'Chart', () => _coming('Chart')),
+        _Cmd(Icons.account_tree_outlined, 'SmartArt', () => _coming('SmartArt')),
+        _Cmd(Icons.screenshot_monitor_outlined, 'Screenshot', () => _coming('Screenshot')),
+      ]),
+      _sectionTitle('Links'),
+      _groupGrid([
+        _Cmd(Icons.link_rounded, 'Link', _insertLink),
+        _Cmd(Icons.bookmark_border_rounded, 'Bookmark', () => _coming('Bookmark')),
+        _Cmd(Icons.device_hub_rounded, 'Cross-reference', () => _coming('Cross-reference')),
+      ]),
+      _sectionTitle('Header & Footer'),
+      _groupGrid([
+        _Cmd(Icons.vertical_align_top_rounded, 'Header', () => _coming('Header')),
+        _Cmd(Icons.vertical_align_bottom_rounded, 'Footer', () => _coming('Footer')),
+        _Cmd(Icons.pin_rounded, 'Page Number', () => _coming('Page Number')),
+      ]),
+      _sectionTitle('Text'),
+      _groupGrid([
+        _Cmd(Icons.text_fields_rounded, 'Text Box', () => _coming('Text Box')),
+        _Cmd(Icons.auto_awesome_motion_rounded, 'Quick Parts', () => _coming('Quick Parts')),
+        _Cmd(Icons.text_format_rounded, 'WordArt', () => _coming('WordArt')),
+        _Cmd(Icons.format_size_rounded, 'Drop Cap', () => _coming('Drop Cap')),
+        _Cmd(Icons.calendar_month_rounded, 'Date & Time', _insertDateTime),
+        _Cmd(Icons.attach_file_rounded, 'Object', () => _coming('Object')),
+      ]),
+      _sectionTitle('Symbols'),
+      _groupGrid([
+        _Cmd(Icons.functions_rounded, 'Equation', () => _coming('Equation')),
+        _Cmd(Icons.emoji_symbols_rounded, 'Symbol', _insertSymbol),
+      ]),
+    ]);
+  }
+
+  Widget _designPane(VoidCallback refresh) {
+    return _paneList([
+      _sectionTitle('Document Formatting'),
+      _groupGrid([
+        _Cmd(Icons.auto_awesome_rounded, 'Themes', () => _coming('Themes')),
+        _Cmd(Icons.palette_outlined, 'Colors', () => _coming('Theme Colors')),
+        _Cmd(Icons.font_download_outlined, 'Fonts', () => _coming('Theme Fonts')),
+        _Cmd(Icons.space_bar_rounded, 'Paragraph Spacing', () => _coming('Paragraph Spacing')),
+        _Cmd(Icons.auto_fix_high_outlined, 'Effects', () => _coming('Theme Effects')),
+        _Cmd(Icons.restart_alt_rounded, 'Set as Default', () => _coming('Set as Default')),
+      ]),
+      _sectionTitle('Page Background'),
+      _groupGrid([
+        _Cmd(Icons.opacity_rounded, 'Watermark', () => _coming('Watermark')),
+        _Cmd(Icons.format_color_fill_rounded, 'Page Color', () => _coming('Page Color')),
+        _Cmd(Icons.border_outer_rounded, 'Page Borders', () => _coming('Page Borders')),
+      ]),
+    ]);
+  }
+
+  Widget _layoutPane(VoidCallback refresh) {
+    return _paneList([
+      _sectionTitle('Page Setup'),
+      _card(
+        child: Column(
+          children: [
+            _choiceRow(
+              Icons.border_outer_rounded,
+              'Margins',
+              _marginPreset,
+              ['Narrow', 'Normal', 'Wide'],
+              (value) {
+                setState(() => _marginPreset = value);
+                refresh();
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.screen_rotation_alt_rounded),
+              title: const Text('Orientation'),
+              trailing: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('Portrait')),
+                  ButtonSegment(value: true, label: Text('Landscape')),
+                ],
+                selected: {_landscape},
+                onSelectionChanged: (values) {
+                  setState(() => _landscape = values.first);
+                  refresh();
+                },
+              ),
+            ),
+            const Divider(height: 1),
+            _choiceRow(
+              Icons.description_outlined,
+              'Size',
+              _pageSize,
+              ['A4', 'Letter', 'Legal'],
+              (value) {
+                setState(() => _pageSize = value);
+                refresh();
+              },
+            ),
+          ],
+        ),
+      ),
+      _groupGrid([
+        _Cmd(Icons.view_week_outlined, 'Columns', () => _coming('Columns')),
+        _Cmd(Icons.call_split_rounded, 'Breaks', () => _coming('Breaks')),
+        _Cmd(Icons.format_list_numbered_rounded, 'Line Numbers', () => _coming('Line Numbers')),
+        _Cmd(Icons.text_rotation_none_rounded, 'Hyphenation', () => _coming('Hyphenation')),
+      ]),
+      _sectionTitle('Paragraph'),
+      _groupGrid([
+        _Cmd(Icons.format_indent_decrease_rounded, 'Indent Left', () => _controller.indentSelection(false)),
+        _Cmd(Icons.format_indent_increase_rounded, 'Indent Right', () => _controller.indentSelection(true)),
+        _Cmd(Icons.vertical_align_top_rounded, 'Spacing Before', () => _coming('Spacing Before')),
+        _Cmd(Icons.vertical_align_bottom_rounded, 'Spacing After', () => _coming('Spacing After')),
+      ]),
+      _sectionTitle('Arrange'),
+      _groupGrid([
+        _Cmd(Icons.layers_outlined, 'Position', () => _coming('Position')),
+        _Cmd(Icons.wrap_text_rounded, 'Wrap Text', () => _coming('Wrap Text')),
+        _Cmd(Icons.vertical_align_top_rounded, 'Bring Forward', () => _coming('Bring Forward')),
+        _Cmd(Icons.vertical_align_bottom_rounded, 'Send Backward', () => _coming('Send Backward')),
+        _Cmd(Icons.align_horizontal_left_rounded, 'Align', () => _coming('Object Align')),
+        _Cmd(Icons.group_work_outlined, 'Group', () => _coming('Group Objects')),
+        _Cmd(Icons.rotate_right_rounded, 'Rotate', () => _coming('Rotate Object')),
+      ]),
+    ]);
+  }
+
+  Widget _referencesPane() {
+    return _paneList([
+      _sectionTitle('Table of Contents'),
+      _groupGrid([
+        _Cmd(Icons.toc_rounded, 'Table of Contents', () => _coming('Table of Contents')),
+        _Cmd(Icons.add_link_rounded, 'Add Text', () => _coming('Add TOC Text')),
+        _Cmd(Icons.refresh_rounded, 'Update Table', () => _coming('Update Table of Contents')),
+      ]),
+      _sectionTitle('Footnotes'),
+      _groupGrid([
+        _Cmd(Icons.format_list_numbered_rounded, 'Insert Footnote', () => _coming('Footnote')),
+        _Cmd(Icons.format_list_numbered_rtl_rounded, 'Insert Endnote', () => _coming('Endnote')),
+        _Cmd(Icons.skip_next_rounded, 'Next Footnote', () => _coming('Next Footnote')),
+        _Cmd(Icons.note_alt_outlined, 'Show Notes', () => _coming('Show Notes')),
+      ]),
+      _sectionTitle('Citations & Bibliography'),
+      _groupGrid([
+        _Cmd(Icons.format_quote_rounded, 'Insert Citation', () => _coming('Insert Citation')),
+        _Cmd(Icons.source_outlined, 'Manage Sources', () => _coming('Manage Sources')),
+        _Cmd(Icons.style_outlined, 'Style', () => _coming('Citation Style')),
+        _Cmd(Icons.menu_book_outlined, 'Bibliography', () => _coming('Bibliography')),
+      ]),
+      _sectionTitle('Captions'),
+      _groupGrid([
+        _Cmd(Icons.closed_caption_outlined, 'Insert Caption', () => _coming('Insert Caption')),
+        _Cmd(Icons.table_rows_outlined, 'Table of Figures', () => _coming('Table of Figures')),
+        _Cmd(Icons.refresh_rounded, 'Update Table', () => _coming('Update Table of Figures')),
+        _Cmd(Icons.device_hub_rounded, 'Cross-reference', () => _coming('Cross-reference')),
+      ]),
+      _sectionTitle('Index'),
+      _groupGrid([
+        _Cmd(Icons.bookmark_add_outlined, 'Mark Entry', () => _coming('Mark Index Entry')),
+        _Cmd(Icons.list_alt_rounded, 'Insert Index', () => _coming('Insert Index')),
+        _Cmd(Icons.refresh_rounded, 'Update Index', () => _coming('Update Index')),
+      ]),
+      _sectionTitle('Table of Authorities'),
+      _groupGrid([
+        _Cmd(Icons.gavel_outlined, 'Mark Citation', () => _coming('Mark Citation')),
+        _Cmd(Icons.account_balance_outlined, 'Insert Authorities', () => _coming('Table of Authorities')),
+        _Cmd(Icons.refresh_rounded, 'Update Table', () => _coming('Update Authorities')),
+      ]),
+    ]);
+  }
+
+  Widget _mailingsPane() {
+    return _paneList([
+      _sectionTitle('Create'),
+      _groupGrid([
+        _Cmd(Icons.mail_outline_rounded, 'Envelopes', () => _coming('Envelopes')),
+        _Cmd(Icons.label_outline_rounded, 'Labels', () => _coming('Labels')),
+      ]),
+      _sectionTitle('Start Mail Merge'),
+      _groupGrid([
+        _Cmd(Icons.merge_type_rounded, 'Start Mail Merge', () => _coming('Start Mail Merge')),
+        _Cmd(Icons.people_outline_rounded, 'Select Recipients', () => _coming('Select Recipients')),
+        _Cmd(Icons.edit_note_rounded, 'Edit Recipient List', () => _coming('Edit Recipient List')),
+      ]),
+      _sectionTitle('Write & Insert Fields'),
+      _groupGrid([
+        _Cmd(Icons.location_on_outlined, 'Address Block', () => _coming('Address Block')),
+        _Cmd(Icons.waving_hand_outlined, 'Greeting Line', () => _coming('Greeting Line')),
+        _Cmd(Icons.data_object_rounded, 'Insert Merge Field', () => _coming('Insert Merge Field')),
+        _Cmd(Icons.rule_rounded, 'Rules', () => _coming('Mail Merge Rules')),
+        _Cmd(Icons.match_word_rounded, 'Match Fields', () => _coming('Match Fields')),
+        _Cmd(Icons.label_important_outline_rounded, 'Update Labels', () => _coming('Update Labels')),
+      ]),
+      _sectionTitle('Preview Results'),
+      _groupGrid([
+        _Cmd(Icons.preview_outlined, 'Preview Results', () => _coming('Preview Results')),
+        _Cmd(Icons.navigate_before_rounded, 'Previous Record', () => _coming('Previous Record')),
+        _Cmd(Icons.navigate_next_rounded, 'Next Record', () => _coming('Next Record')),
+        _Cmd(Icons.person_search_outlined, 'Find Recipient', () => _coming('Find Recipient')),
+        _Cmd(Icons.fact_check_outlined, 'Check for Errors', () => _coming('Mail Merge Error Check')),
+      ]),
+      _sectionTitle('Finish'),
+      _groupGrid([
+        _Cmd(Icons.done_all_rounded, 'Finish & Merge', () => _coming('Finish & Merge')),
+      ]),
+    ]);
+  }
+
+  Widget _reviewPane(VoidCallback refresh) {
+    return _paneList([
+      _sectionTitle('Proofing'),
+      _groupGrid([
+        _Cmd(Icons.spellcheck_rounded, 'Spelling & Grammar', () => _coming('Spelling & Grammar')),
+        _Cmd(Icons.menu_book_outlined, 'Thesaurus', () => _coming('Thesaurus')),
+        _Cmd(Icons.calculate_outlined, 'Word Count', _showWordCount),
+      ]),
+      _sectionTitle('Language'),
+      _groupGrid([
+        _Cmd(Icons.translate_rounded, 'Translate', () => _coming('Translate')),
+        _Cmd(Icons.language_rounded, 'Language', () => _coming('Proofing Language')),
+      ]),
+      _sectionTitle('Comments'),
+      _groupGrid([
+        _Cmd(Icons.add_comment_outlined, 'New Comment', () => _coming('New Comment')),
+        _Cmd(Icons.delete_outline_rounded, 'Delete', () => _coming('Delete Comment')),
+        _Cmd(Icons.navigate_before_rounded, 'Previous', () => _coming('Previous Comment')),
+        _Cmd(Icons.navigate_next_rounded, 'Next', () => _coming('Next Comment')),
+        _Cmd(Icons.comments_disabled_outlined, 'Show Comments', () => _coming('Show Comments')),
+      ]),
+      _sectionTitle('Tracking'),
+      _groupGrid([
+        _Cmd(Icons.track_changes_rounded, 'Track Changes', () => _coming('Track Changes')),
+        _Cmd(Icons.tune_rounded, 'Display for Review', () => _coming('Display for Review')),
+        _Cmd(Icons.list_alt_rounded, 'Show Markup', () => _coming('Show Markup')),
+        _Cmd(Icons.fact_check_outlined, 'Reviewing Pane', () => _coming('Reviewing Pane')),
+      ]),
+      _sectionTitle('Changes'),
+      _groupGrid([
+        _Cmd(Icons.check_circle_outline_rounded, 'Accept', () => _coming('Accept Change')),
+        _Cmd(Icons.cancel_outlined, 'Reject', () => _coming('Reject Change')),
+        _Cmd(Icons.navigate_before_rounded, 'Previous', () => _coming('Previous Change')),
+        _Cmd(Icons.navigate_next_rounded, 'Next', () => _coming('Next Change')),
+      ]),
+      _sectionTitle('Compare & Protect'),
+      _groupGrid([
+        _Cmd(Icons.compare_arrows_rounded, 'Compare', () => _coming('Compare Documents')),
+        _Cmd(Icons.merge_rounded, 'Combine', () => _coming('Combine Documents')),
+        _Cmd(Icons.lock_outline_rounded, 'Restrict Editing', () => _coming('Restrict Editing')),
+      ]),
+      _sectionTitle('Editing'),
+      _groupGrid([
+        _Cmd(Icons.search_rounded, 'Find', _findReplaceDialog),
+        _Cmd(Icons.find_replace_rounded, 'Replace', _findReplaceDialog),
+        _Cmd(Icons.select_all_rounded, 'Select All', _selectAll),
+      ]),
+    ]);
+  }
+
+  Widget _viewPane(VoidCallback refresh, BuildContext sheetContext) {
+    return _paneList([
+      _sectionTitle('Views'),
+      _groupGrid([
+        _Cmd(Icons.chrome_reader_mode_outlined, 'Read Mode', () => _coming('Read Mode')),
+        _Cmd(Icons.article_outlined, 'Print Layout', () {
+          setState(() => _printLayout = true);
+          refresh();
+          Navigator.pop(sheetContext);
+        }),
+        _Cmd(Icons.web_asset_outlined, 'Web Layout', () => _coming('Web Layout')),
+        _Cmd(Icons.view_headline_rounded, 'Outline', () => _coming('Outline View')),
+        _Cmd(Icons.drafts_outlined, 'Draft', () => _coming('Draft View')),
+      ]),
+      _sectionTitle('Show'),
+      _groupGrid([
+        _Cmd(Icons.straighten_rounded, 'Ruler', () => _coming('Ruler')),
+        _Cmd(Icons.grid_on_outlined, 'Gridlines', () => _coming('Gridlines')),
+        _Cmd(Icons.view_sidebar_outlined, 'Navigation Pane', () => _coming('Navigation Pane')),
+      ]),
+      _sectionTitle('Zoom'),
+      _groupGrid([
+        _Cmd(Icons.zoom_in_rounded, 'Zoom', () => _coming('Interactive Zoom')),
+        _Cmd(Icons.filter_1_outlined, '100%', () => _coming('100% Zoom')),
+        _Cmd(Icons.looks_one_outlined, 'One Page', () => _coming('One Page')),
+        _Cmd(Icons.grid_view_outlined, 'Multiple Pages', () => _coming('Multiple Pages')),
+        _Cmd(Icons.fit_screen_rounded, 'Page Width', () {
+          setState(() => _fitPageWidth = true);
+          refresh();
+          Navigator.pop(sheetContext);
+        }),
+      ]),
+      _sectionTitle('Window'),
+      _groupGrid([
+        _Cmd(Icons.add_box_outlined, 'New Window', () => _coming('New Window')),
+        _Cmd(Icons.view_agenda_outlined, 'Arrange All', () => _coming('Arrange All')),
+        _Cmd(Icons.call_split_rounded, 'Split', () => _coming('Split Window')),
+        _Cmd(Icons.sync_alt_rounded, 'View Side by Side', () => _coming('View Side by Side')),
+        _Cmd(Icons.vertical_align_center_rounded, 'Synchronous Scrolling', () => _coming('Synchronous Scrolling')),
+        _Cmd(Icons.restart_alt_rounded, 'Reset Window Position', () => _coming('Reset Window Position')),
+        _Cmd(Icons.window_outlined, 'Switch Windows', () => _coming('Switch Windows')),
+      ]),
+      _sectionTitle('Macros & Output'),
+      _groupGrid([
+        _Cmd(Icons.code_rounded, 'Macros', () => _coming('Macros')),
+        _Cmd(Icons.preview_rounded, 'Print Preview', _printPreview),
+        _Cmd(Icons.print_rounded, 'Print', () => Printing.layoutPdf(onLayout: _buildPrintPdf)),
+      ]),
+    ]);
+  }
+
+  Future<void> _showMoreFontCommands(VoidCallback refresh) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('More Font Commands'),
+        content: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _dialogChip('Subscript', () {
+              _toggle(Attribute.subscript);
+              refresh();
+            }),
+            _dialogChip('Clear Formatting', () {
+              _clearFormatting();
+              refresh();
+            }),
+            _dialogChip('Text Effects', () => _coming('Text Effects')),
+            _dialogChip('Change Case', () => _coming('Change Case')),
+            _dialogChip('Character Spacing', () => _coming('Character Spacing')),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dialogChip(String label, VoidCallback onPressed) {
+    return ActionChip(
+      label: Text(label),
+      onPressed: onPressed,
+    );
+  }
+
+  Future<void> _showLineSpacing(VoidCallback refresh) async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (_) => SimpleDialog(
+        title: const Text('Line Spacing'),
+        children: ['1.0', '1.15', '1.5', '2.0']
+            .map(
+              (value) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, value),
+                child: Text(value),
+              ),
+            )
+            .toList(),
+      ),
+    );
+    if (choice == null) return;
+    _setAttr(Attribute.lineHeight.key, double.parse(choice));
+    refresh();
+  }
+
+  Widget _stylesRow(VoidCallback refresh) {
+    Widget styleButton(String label, int? level) {
+      final active = level == null
+          ? !_style.containsKey(Attribute.header.key)
+          : _style[Attribute.header.key]?.value == level;
+
+      return Expanded(
+        child: InkWell(
+          onTap: () {
+            _setAttr(Attribute.header.key, level);
+            refresh();
+          },
+          child: Container(
+            height: 76,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: active ? const Color(0xFFF0F0F0) : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.black87,
+                fontSize: level == 1 ? 17 : 14,
+                fontWeight: level == null ? FontWeight.w400 : FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          styleButton('Heading\n1', 1),
+          styleButton('Heading 2', 2),
+          styleButton('Heading 3', 3),
+          styleButton('Normal', null),
+        ],
+      ),
+    );
+  }
+
+  Widget _fontFamilyRow(VoidCallback refresh) {
+    const fonts = [
+      'Default',
+      'Arial',
+      'Calibri',
+      'Times New Roman',
+      'serif',
+      'sans-serif',
+      'monospace',
+    ];
+
+    return ListTile(
+      leading: const Icon(Icons.font_download_outlined, size: 34),
+      title: const Text('Font'),
+      trailing: DropdownButton<String>(
+        value: fonts.contains(_fontLabel) ? _fontLabel : 'Default',
+        underline: const SizedBox.shrink(),
+        onChanged: (value) {
+          if (value == null) return;
+          _setAttr(
+            Attribute.font.key,
+            value == 'Default' ? null : value,
+          );
+          refresh();
+        },
+        items: fonts
+            .map(
+              (font) => DropdownMenuItem(
+                value: font,
+                child: Text(font),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+
+  Widget _fontSizeRow(VoidCallback refresh) {
+    return ListTile(
+      leading: const Icon(Icons.format_size_rounded, size: 34),
+      title: const Text('Font Size'),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            onPressed: () {
+              _changeFontSize(-1);
+              refresh();
+            },
+            icon: const Icon(Icons.remove_rounded),
+          ),
+          Container(
+            width: 58,
+            height: 48,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F1F1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _fontSize.toInt().toString(),
+              style: const TextStyle(fontSize: 18),
+            ),
+          ),
+          IconButton(
+            onPressed: () {
+              _changeFontSize(1);
+              refresh();
+            },
+            icon: const Icon(Icons.add_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _fontColorsRow(VoidCallback refresh) {
+    const colors = [
+      Color(0xFF111111),
+      Color(0xFFD7191C),
+      Color(0xFFFFB000),
+      Color(0xFF7AC943),
+      Color(0xFF00A9CE),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: colors.map((color) {
+          return InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              final hex =
+                  '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+              _setAttr(Attribute.color.key, hex);
+              refresh();
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                'A',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 36,
+                  fontWeight: FontWeight.w600,
                 ),
-                if (widget.isDocx)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 5,
-                    ),
-                    color: const Color(0xFF5F4A11),
-                    child: const Text(
-                      'Rich editing active • Full DOCX formatting round-trip is the next engine milestone',
-                      style: TextStyle(
-                        color: Color(0xFFFFE394),
-                        fontSize: 10,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _bigFormatButton(
+    String label,
+    bool selected,
+    VoidCallback onTap, {
+    FontWeight? fontWeight,
+    FontStyle? fontStyle,
+    TextDecoration? decoration,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 88,
+          alignment: Alignment.center,
+          color: selected ? const Color(0xFFE9F2FF) : Colors.white,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: Colors.black87,
+              fontSize: 34,
+              fontWeight: fontWeight,
+              fontStyle: fontStyle,
+              decoration: decoration,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _iconFormatButton(IconData icon, VoidCallback onTap) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 88,
+          child: Icon(icon, color: Colors.black87, size: 32),
+        ),
+      ),
+    );
+  }
+
+  Widget _paneList(List<Widget> children) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 28),
+      children: children,
+    );
+  }
+
+  Widget _sectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 10, 4, 8),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.black54,
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
+  Widget _card({required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE4E4E4)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    );
+  }
+
+  Widget _commandCell(
+    IconData icon,
+    String label,
+    VoidCallback onTap,
+  ) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 90,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: accent, size: 27),
+              const SizedBox(height: 7),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _smallCommand(
+    IconData icon,
+    String label,
+    VoidCallback onTap,
+  ) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: 102,
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: accent, size: 24),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.black87,
+                fontSize: 10,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _groupGrid(List<_Cmd> commands) {
+    return _card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Wrap(
+          alignment: WrapAlignment.start,
+          spacing: 0,
+          runSpacing: 0,
+          children: commands.map((command) {
+            return SizedBox(
+              width: 108,
+              height: 88,
+              child: InkWell(
+                onTap: command.onTap,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(command.icon, color: accent, size: 27),
+                    const SizedBox(height: 7),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        command.label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontSize: 10.5,
+                        ),
                       ),
                     ),
-                  ),
-                Expanded(child: _documentCanvas()),
-                _statusBar(),
-              ],
-            ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _choiceRow(
+    IconData icon,
+    String label,
+    String value,
+    List<String> choices,
+    ValueChanged<String> onChanged,
+  ) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(label),
+      trailing: DropdownButton<String>(
+        value: value,
+        underline: const SizedBox.shrink(),
+        onChanged: (next) {
+          if (next != null) onChanged(next);
+        },
+        items: choices
+            .map(
+              (choice) => DropdownMenuItem(
+                value: choice,
+                child: Text(choice),
+              ),
+            )
+            .toList(),
+      ),
     );
   }
 
@@ -692,6 +1655,13 @@ class _TextEditorScreenState extends State<TextEditorScreen>
             ? maxAvailable
             : math.min(maxAvailable, 540.0);
         final pageHeight = math.max(700.0, pageWidth * _pageAspect);
+
+        final lightTheme = ThemeData.light(useMaterial3: true).copyWith(
+          textTheme: ThemeData.light().textTheme.apply(
+                bodyColor: Colors.black,
+                displayColor: Colors.black,
+              ),
+        );
 
         return Container(
           color: _printLayout
@@ -720,14 +1690,34 @@ class _TextEditorScreenState extends State<TextEditorScreen>
                         ]
                       : null,
                 ),
-                child: Theme(
-                  data: ThemeData.light(useMaterial3: true),
-                  child: QuillEditor.basic(
-                    controller: _controller,
-                    config: const QuillEditorConfig(
-                      padding: EdgeInsets.zero,
-                      expands: false,
-                      placeholder: 'Start typing…',
+                child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: (_) => _focusEditor(),
+                  child: Theme(
+                    data: lightTheme,
+                    child: DefaultTextStyle.merge(
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 14,
+                        height: 1.3,
+                      ),
+                      child: QuillEditor.basic(
+                        controller: _controller,
+                        focusNode: _editorFocusNode,
+                        scrollController: _editorScrollController,
+                        config: const QuillEditorConfig(
+                          padding: EdgeInsets.zero,
+                          expands: false,
+                          scrollable: false,
+                          autoFocus: false,
+                          showCursor: true,
+                          onTapOutsideEnabled: false,
+                          enableInteractiveSelection: true,
+                          enableSelectionToolbar: true,
+                          keyboardAppearance: Brightness.light,
+                          placeholder: 'Start typing…',
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -739,556 +1729,143 @@ class _TextEditorScreenState extends State<TextEditorScreen>
     );
   }
 
-  Widget _homeRibbon() {
-    return _scrollRibbon([
-      _tool(Icons.undo_rounded, 'Undo',
-          _controller.hasUndo ? _controller.undo : null),
-      _tool(Icons.redo_rounded, 'Redo',
-          _controller.hasRedo ? _controller.redo : null),
-      _tool(Icons.content_cut_rounded, 'Cut', _cut),
-      _tool(Icons.copy_rounded, 'Copy', _copy),
-      _tool(Icons.content_paste_rounded, 'Paste', _paste),
-      _fontMenu(),
-      _sizeMenu(),
-      _tool(
-        Icons.text_decrease_rounded,
-        'Size −',
-        () => _changeFontSize(-1),
-      ),
-      _tool(
-        Icons.text_increase_rounded,
-        'Size +',
-        () => _changeFontSize(1),
-      ),
-      _tool(
-        Icons.format_bold_rounded,
-        'Bold',
-        () => _toggle(Attribute.bold),
-        selected: _isActive(Attribute.bold),
-      ),
-      _tool(
-        Icons.format_italic_rounded,
-        'Italic',
-        () => _toggle(Attribute.italic),
-        selected: _isActive(Attribute.italic),
-      ),
-      _tool(
-        Icons.format_underlined_rounded,
-        'Underline',
-        () => _toggle(Attribute.underline),
-        selected: _isActive(Attribute.underline),
-      ),
-      _tool(
-        Icons.format_strikethrough_rounded,
-        'Strike',
-        () => _toggle(Attribute.strikeThrough),
-        selected: _isActive(Attribute.strikeThrough),
-      ),
-      _tool(
-        Icons.superscript_rounded,
-        'Super',
-        () => _toggle(Attribute.superscript),
-        selected: _isActive(Attribute.superscript),
-      ),
-      _tool(
-        Icons.subscript_rounded,
-        'Sub',
-        () => _toggle(Attribute.subscript),
-        selected: _isActive(Attribute.subscript),
-      ),
-      _colorMenu(false),
-      _colorMenu(true),
-      _headingMenu(),
-      _alignMenu(),
-      _tool(
-        Icons.format_list_bulleted_rounded,
-        'Bullets',
-        () => _toggle(Attribute.ul),
-        selected: _isActive(Attribute.ul),
-      ),
-      _tool(
-        Icons.format_list_numbered_rounded,
-        'Numbering',
-        () => _toggle(Attribute.ol),
-        selected: _isActive(Attribute.ol),
-      ),
-      _tool(
-        Icons.format_indent_decrease_rounded,
-        'Indent −',
-        () => _controller.indentSelection(false),
-      ),
-      _tool(
-        Icons.format_indent_increase_rounded,
-        'Indent +',
-        () => _controller.indentSelection(true),
-      ),
-      _tool(
-        Icons.format_clear_rounded,
-        'Clear',
-        _clearFormatting,
-      ),
-    ]);
-  }
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.path == null
+        ? 'New Document'
+        : widget.path!.split('/').last;
 
-  Widget _insertRibbon() {
-    return _scrollRibbon([
-      _tool(
-        Icons.table_chart_rounded,
-        'Table',
-        () => _coming('Table insertion'),
-      ),
-      _tool(
-        Icons.image_rounded,
-        'Picture',
-        () => _coming('Image insertion'),
-      ),
-      _tool(
-        Icons.photo_camera_rounded,
-        'Camera',
-        () => _coming('Camera image'),
-      ),
-      _tool(
-        Icons.category_outlined,
-        'Shapes',
-        () => _coming('Shapes'),
-      ),
-      _tool(
-        Icons.text_fields_rounded,
-        'Text box',
-        () => _coming('Text box'),
-      ),
-      _tool(
-        Icons.link_rounded,
-        'Link',
-        _insertLink,
-      ),
-      _tool(
-        Icons.horizontal_rule_rounded,
-        'Page break',
-        () => _coming('True page break'),
-      ),
-      _tool(
-        Icons.vertical_align_top_rounded,
-        'Header',
-        () => _coming('Header'),
-      ),
-      _tool(
-        Icons.vertical_align_bottom_rounded,
-        'Footer',
-        () => _coming('Footer'),
-      ),
-      _tool(
-        Icons.pin_rounded,
-        'Page no.',
-        () => _coming('Page numbering'),
-      ),
-      _tool(
-        Icons.calendar_month_rounded,
-        'Date/Time',
-        _insertDateTime,
-      ),
-      _tool(
-        Icons.functions_rounded,
-        'Symbol',
-        _insertSymbol,
-      ),
-    ]);
-  }
-
-  Widget _layoutRibbon() {
-    return _scrollRibbon([
-      _pageSizeMenu(),
-      _tool(
-        _landscape
-            ? Icons.stay_current_landscape_rounded
-            : Icons.stay_current_portrait_rounded,
-        _landscape ? 'Landscape' : 'Portrait',
-        () => setState(() => _landscape = !_landscape),
-        selected: _landscape,
-      ),
-      _marginMenu(),
-      _tool(
-        Icons.view_week_outlined,
-        'Columns',
-        () => _coming('Page columns'),
-      ),
-      _tool(
-        Icons.format_line_spacing_rounded,
-        'Line space',
-        () => _coming('Advanced line spacing'),
-      ),
-      _tool(
-        Icons.space_bar_rounded,
-        'Paragraph',
-        () => _coming('Paragraph spacing'),
-      ),
-      _tool(
-        Icons.format_indent_decrease_rounded,
-        'Left indent',
-        () => _controller.indentSelection(false),
-      ),
-      _tool(
-        Icons.format_indent_increase_rounded,
-        'Right indent',
-        () => _controller.indentSelection(true),
-      ),
-    ]);
-  }
-
-  Widget _viewRibbon() {
-    return _scrollRibbon([
-      _tool(
-        Icons.article_outlined,
-        'Print layout',
-        () => setState(() => _printLayout = !_printLayout),
-        selected: _printLayout,
-      ),
-      _tool(
-        Icons.fit_screen_rounded,
-        'Page width',
-        () => setState(() => _fitPageWidth = !_fitPageWidth),
-        selected: _fitPageWidth,
-      ),
-      _tool(
-        Icons.zoom_out_rounded,
-        'Zoom −',
-        () => _coming('Interactive zoom'),
-      ),
-      _tool(
-        Icons.zoom_in_rounded,
-        'Zoom +',
-        () => _coming('Interactive zoom'),
-      ),
-      _tool(
-        Icons.fullscreen_rounded,
-        'Full screen',
-        () => _coming('Full screen editing'),
-      ),
-      _tool(
-        Icons.straighten_rounded,
-        'Ruler',
-        () => _coming('Ruler'),
-      ),
-      _tool(
-        Icons.print_rounded,
-        'Preview',
-        _printPreview,
-      ),
-      _tool(
-        Icons.print_outlined,
-        'Print',
-        () => Printing.layoutPdf(onLayout: _buildPrintPdf),
-      ),
-    ]);
-  }
-
-  Widget _reviewRibbon() {
-    return _scrollRibbon([
-      _tool(
-        Icons.search_rounded,
-        'Find',
-        _findReplaceDialog,
-      ),
-      _tool(
-        Icons.find_replace_rounded,
-        'Replace',
-        _findReplaceDialog,
-      ),
-      _tool(
-        Icons.select_all_rounded,
-        'Select all',
-        _selectAll,
-      ),
-      _tool(
-        Icons.calculate_outlined,
-        'Word count',
-        _showWordCount,
-      ),
-      _tool(
-        Icons.spellcheck_rounded,
-        'Spelling',
-        () => _coming('Spell checking'),
-      ),
-      _tool(
-        Icons.comment_outlined,
-        'Comment',
-        () => _coming('Comments'),
-      ),
-      _tool(
-        Icons.track_changes_rounded,
-        'Track',
-        () => _coming('Track changes'),
-      ),
-      _tool(
-        Icons.compare_arrows_rounded,
-        'Compare',
-        () => _coming('Document compare'),
-      ),
-    ]);
-  }
-
-  Widget _scrollRibbon(List<Widget> children) {
-    return Container(
-      color: panel,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        child: Row(children: children),
-      ),
-    );
-  }
-
-  Widget _tool(
-    IconData icon,
-    String label,
-    VoidCallback? onTap, {
-    bool selected = false,
-  }) {
-    final enabled = onTap != null;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          width: 62,
-          height: 96,
-          decoration: BoxDecoration(
-            color: selected
-                ? const Color(0xFF173E78)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            border: selected
-                ? Border.all(color: const Color(0xFF4E93EE))
-                : null,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 25,
-                color: enabled ? accent : Colors.white24,
-              ),
-              const SizedBox(height: 7),
-              Text(
-                label,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: enabled ? Colors.white70 : Colors.white24,
-                  fontSize: 9.5,
-                  height: 1.05,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _popupShell(IconData icon, String label, {bool selected = false}) {
-    return Container(
-      width: 72,
-      height: 96,
-      decoration: BoxDecoration(
-        color: selected ? const Color(0xFF173E78) : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 25, color: accent),
-          const SizedBox(height: 7),
-          Text(
-            label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 9.5,
-              height: 1.05,
-            ),
-          ),
-          const Icon(Icons.arrow_drop_down_rounded, color: Colors.white38, size: 15),
-        ],
-      ),
-    );
-  }
-
-  Widget _fontMenu() {
-    const fonts = [
-      'Roboto',
-      'Arial',
-      'Calibri',
-      'Times New Roman',
-      'serif',
-      'sans-serif',
-      'monospace',
-    ];
-    return PopupMenuButton<String>(
-      tooltip: 'Font',
-      onSelected: (value) => _setAttr(Attribute.font.key, value),
-      itemBuilder: (_) => fonts
-          .map((font) => PopupMenuItem(value: font, child: Text(font)))
-          .toList(),
-      child: _popupShell(Icons.font_download_outlined, _fontLabel),
-    );
-  }
-
-  Widget _sizeMenu() {
-    const sizes = <double>[
-      8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72
-    ];
-    return PopupMenuButton<double>(
-      tooltip: 'Font size',
-      onSelected: (value) => _setAttr(Attribute.size.key, value),
-      itemBuilder: (_) => sizes
-          .map(
-            (size) => PopupMenuItem(
-              value: size,
-              child: Text(size.toInt().toString()),
-            ),
-          )
-          .toList(),
-      child: _popupShell(
-        Icons.format_size_rounded,
-        _fontSize.toInt().toString(),
-      ),
-    );
-  }
-
-  Widget _headingMenu() {
-    return PopupMenuButton<int>(
-      tooltip: 'Style',
-      onSelected: (value) {
-        if (value == 0) {
-          _setAttr(Attribute.header.key, null);
-        } else {
-          _setAttr(Attribute.header.key, value);
-        }
-      },
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 0, child: Text('Normal')),
-        PopupMenuItem(value: 1, child: Text('Heading 1')),
-        PopupMenuItem(value: 2, child: Text('Heading 2')),
-        PopupMenuItem(value: 3, child: Text('Heading 3')),
-      ],
-      child: _popupShell(Icons.title_rounded, 'Styles'),
-    );
-  }
-
-  Widget _alignMenu() {
-    return PopupMenuButton<String>(
-      tooltip: 'Alignment',
-      onSelected: (value) {
-        _setAttr(
-          Attribute.align.key,
-          value == 'left' ? null : value,
-        );
-      },
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'left', child: Text('Align left')),
-        PopupMenuItem(value: 'center', child: Text('Center')),
-        PopupMenuItem(value: 'right', child: Text('Align right')),
-        PopupMenuItem(value: 'justify', child: Text('Justify')),
-      ],
-      child: _popupShell(Icons.format_align_left_rounded, 'Align'),
-    );
-  }
-
-  Widget _colorMenu(bool background) {
-    const colors = <String, String>{
-      'Black': '#000000',
-      'Red': '#E53935',
-      'Blue': '#1E88E5',
-      'Green': '#2E7D32',
-      'Orange': '#F57C00',
-      'Purple': '#8E24AA',
-      'Yellow': '#FFF176',
-      'Clear': '',
-    };
-    return PopupMenuButton<String>(
-      tooltip: background ? 'Highlight' : 'Font color',
-      onSelected: (value) => _setAttr(
-        background ? Attribute.background.key : Attribute.color.key,
-        value.isEmpty ? null : value,
-      ),
-      itemBuilder: (_) => colors.entries
-          .map(
-            (entry) => PopupMenuItem(
-              value: entry.value,
-              child: Text(entry.key),
-            ),
-          )
-          .toList(),
-      child: _popupShell(
-        background
-            ? Icons.format_color_fill_rounded
-            : Icons.format_color_text_rounded,
-        background ? 'Highlight' : 'Color',
-      ),
-    );
-  }
-
-  Widget _pageSizeMenu() {
-    return PopupMenuButton<String>(
-      tooltip: 'Page size',
-      onSelected: (value) => setState(() => _pageSize = value),
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'A4', child: Text('A4')),
-        PopupMenuItem(value: 'Letter', child: Text('Letter')),
-        PopupMenuItem(value: 'Legal', child: Text('Legal')),
-      ],
-      child: _popupShell(Icons.description_outlined, _pageSize),
-    );
-  }
-
-  Widget _marginMenu() {
-    return PopupMenuButton<String>(
-      tooltip: 'Margins',
-      onSelected: (value) => setState(() => _marginPreset = value),
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'Narrow', child: Text('Narrow')),
-        PopupMenuItem(value: 'Normal', child: Text('Normal')),
-        PopupMenuItem(value: 'Wide', child: Text('Wide')),
-      ],
-      child: _popupShell(Icons.border_outer_rounded, _marginPreset),
-    );
-  }
-
-  Widget _statusBar() {
     final plain = _controller.document.toPlainText().trim();
     final words = plain.isEmpty
         ? 0
         : plain.split(RegExp(r'\s+')).where((e) => e.isNotEmpty).length;
 
-    return Container(
-      height: 34,
-      color: navy,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Row(
-        children: [
-          const Text(
-            'Page 1',
-            style: TextStyle(color: Colors.white54, fontSize: 11),
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      backgroundColor: const Color(0xFF06152F),
+      appBar: AppBar(
+        title: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Keyboard',
+            onPressed: _focusEditor,
+            icon: const Icon(Icons.keyboard_rounded),
           ),
-          const SizedBox(width: 16),
-          Text(
-            'Words: $words',
-            style: const TextStyle(color: Colors.white54, fontSize: 11),
+          IconButton(
+            tooltip: 'Document tools',
+            onPressed: _showWordRibbon,
+            icon: const Icon(Icons.text_format_rounded),
           ),
-          const Spacer(),
-          Text(
-            '$_pageSize • ${_landscape ? 'Landscape' : 'Portrait'}',
-            style: const TextStyle(color: Colors.white38, fontSize: 10),
+          IconButton(
+            tooltip: 'Save',
+            onPressed: _quickSave,
+            icon: const Icon(Icons.save_rounded),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'File',
+            onSelected: (value) {
+              switch (value) {
+                case 'saveAs':
+                  _saveAs();
+                  break;
+                case 'preview':
+                  _printPreview();
+                  break;
+                case 'print':
+                  Printing.layoutPdf(onLayout: _buildPrintPdf);
+                  break;
+                case 'wordCount':
+                  _showWordCount();
+                  break;
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'saveAs', child: Text('Save As')),
+              PopupMenuItem(value: 'preview', child: Text('Print Preview')),
+              PopupMenuItem(value: 'print', child: Text('Print')),
+              PopupMenuItem(value: 'wordCount', child: Text('Word Count')),
+            ],
           ),
         ],
       ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                if (widget.isDocx)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
+                    color: const Color(0xFF5F4A11),
+                    child: const Text(
+                      'Rich editing active • Native DOCX fidelity engine is under migration',
+                      style: TextStyle(
+                        color: Color(0xFFFFE394),
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                Expanded(child: _documentCanvas()),
+                Container(
+                  height: 38,
+                  color: navy,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: [
+                      const Text(
+                        'Page 1',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Text(
+                        'Words: $words',
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _showWordRibbon,
+                        icon: const Icon(
+                          Icons.text_format_rounded,
+                          size: 18,
+                        ),
+                        label: const Text('Tools'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white70,
+                        ),
+                      ),
+                      Text(
+                        '$_pageSize • ${_landscape ? 'Landscape' : 'Portrait'}',
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
     );
   }
+}
+
+class _Cmd {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _Cmd(this.icon, this.label, this.onTap);
 }
