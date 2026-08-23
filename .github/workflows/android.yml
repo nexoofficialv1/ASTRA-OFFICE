@@ -1,0 +1,22 @@
+name: Build ASTRA OFFICE APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter create . --platforms=android --org com.astra.office --project-name astra_office
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ASTRA-OFFICE-v0.1.0-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
