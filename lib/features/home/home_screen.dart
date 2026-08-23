@@ -22,7 +22,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _refresh() async { items = await recent.getRecent(); if (mounted) setState((){}); }
 
   Future<void> _openPicker() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['docx','xlsx','xls','csv','pptx','ppt','pdf','txt','md']);
+    final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['docx','xlsx','xls','csv','pptx','ppt','pdf','txt','md']);
     final path = result?.files.single.path;
     if(path == null) return;
     await _open(path);

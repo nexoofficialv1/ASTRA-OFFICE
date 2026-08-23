@@ -50,7 +50,7 @@ class _SpreadsheetScreenState extends State<SpreadsheetScreen> {
   }
 
   Future<void> _save() async {
-    final path = await FilePicker.platform.saveFile(dialogTitle: 'Save spreadsheet', fileName: 'Workbook.xlsx');
+    final path = await FilePicker.saveFile(dialogTitle: 'Save spreadsheet', fileName: 'Workbook.xlsx');
     if (path == null) return;
     final bytes = _book.encode();
     if (bytes != null) await File(path).writeAsBytes(bytes, flush: true);

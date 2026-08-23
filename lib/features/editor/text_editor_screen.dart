@@ -39,7 +39,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
 
   Future<void> _saveAs() async {
     final defaultName = widget.isDocx ? 'Document.docx' : 'Document.txt';
-    final path = await FilePicker.platform.saveFile(dialogTitle: 'Save as', fileName: defaultName);
+    final path = await FilePicker.saveFile(dialogTitle: 'Save as', fileName: defaultName);
     if (path == null) return;
     if (!mounted) return;
     if (widget.isDocx) {
