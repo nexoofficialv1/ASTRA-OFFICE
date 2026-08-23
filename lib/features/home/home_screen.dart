@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/office_file.dart';
 import '../../services/file_type_service.dart';
 import '../../services/recent_service.dart';
+import '../editor/full_fidelity_open_screen.dart';
 import '../editor/spreadsheet_screen.dart';
 import '../editor/text_editor_screen.dart';
 import '../editor/viewer_screen.dart';
@@ -48,7 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
     late Widget page;
     switch (type) {
       case OfficeFileType.document:
-        page = TextEditorScreen(path: path, isDocx: true);
+        page = FullFidelityOpenScreen(path: path);
         break;
       case OfficeFileType.text:
         page = TextEditorScreen(path: path);

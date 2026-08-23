@@ -1,0 +1,56 @@
+name: ONLYOFFICE Native Engine Spike
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'engine/onlyoffice-v060'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone ONLYOFFICE Android source
+        run: |
+          git clone --depth 1 \
+            https://github.com/ONLYOFFICE/documents-app-android.git \
+            onlyoffice-src
+
+      - name: Inspect native editor build surface
+        run: |
+          cd onlyoffice-src
+
+          echo "=== ONLYOFFICE HEAD ==="
+          git rev-parse HEAD
+
+          echo "=== ROOT ==="
+          ls -la
+
+          echo "=== BUILD SURFACE ==="
+          find . -maxdepth 4 -type f \
+            \( -name "build*.sh" -o -name "gradlew" -o -name "build.gradle" -o -name "build.gradle.kts" \) \
+            | sort | head -n 160
+
+          echo "=== LICENSE HEAD ==="
+          head -n 35 LICENSE.txt || true
+
+      - name: Record spike result
+        run: |
+          mkdir -p engine-spike
+          cat > engine-spike/README.txt <<'EOF'
+          ASTRA OFFICE v0.6.0 native engine probe completed.
+
+          Next integration gates:
+          1. resolve upstream Android editor build dependencies,
+          2. isolate the local document editor module/AAR boundary,
+          3. expose open/save through ASTRA platform channels,
+          4. preserve AGPL/commercial licensing compliance.
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ASTRA-OFFICE-ENGINE-SPIKE
+          path: engine-spike/

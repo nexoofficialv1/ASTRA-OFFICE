@@ -2,7 +2,9 @@ name: Build ASTRA OFFICE APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'engine/**'
 jobs:
   build:
     runs-on: ubuntu-latest

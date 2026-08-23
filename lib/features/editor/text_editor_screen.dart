@@ -40,6 +40,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
   bool _landscape = false;
   bool _printLayout = true;
   bool _fitPageWidth = true;
+  bool _toolsPinned = true;
 
   static const wordBlue = Color(0xFF185ABD);
   static const wordBlueDark = Color(0xFF114B98);
@@ -1764,6 +1765,160 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
     );
   }
 
+  void _cycleAlignment() {
+    final current = _style[Attribute.align.key]?.value?.toString();
+
+    switch (current) {
+      case 'center':
+        _setAttr(Attribute.align.key, 'right');
+        break;
+      case 'right':
+        _setAttr(Attribute.align.key, 'justify');
+        break;
+      case 'justify':
+        _setAttr(Attribute.align.key, null);
+        break;
+      default:
+        _setAttr(Attribute.align.key, 'center');
+    }
+  }
+
+  Widget _pinnedToolsBar() {
+    return Material(
+      color: Colors.white,
+      elevation: 8,
+      child: SizedBox(
+        height: 92,
+        child: GridView.count(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 4,
+            vertical: 3,
+          ),
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: 6,
+          childAspectRatio: 1.35,
+          children: [
+            _pinTool(
+              Icons.undo_rounded,
+              'Undo',
+              _controller.hasUndo ? _controller.undo : null,
+            ),
+            _pinTool(
+              Icons.redo_rounded,
+              'Redo',
+              _controller.hasRedo ? _controller.redo : null,
+            ),
+            _pinTool(
+              Icons.format_bold_rounded,
+              'Bold',
+              () => _toggle(Attribute.bold),
+              active: _isActive(Attribute.bold),
+            ),
+            _pinTool(
+              Icons.format_italic_rounded,
+              'Italic',
+              () => _toggle(Attribute.italic),
+              active: _isActive(Attribute.italic),
+            ),
+            _pinTool(
+              Icons.format_underlined_rounded,
+              'Underline',
+              () => _toggle(Attribute.underline),
+              active: _isActive(Attribute.underline),
+            ),
+            _pinTool(
+              Icons.text_decrease_rounded,
+              'A−',
+              () => _changeFontSize(-1),
+            ),
+            _pinTool(
+              Icons.text_increase_rounded,
+              'A+',
+              () => _changeFontSize(1),
+            ),
+            _pinTool(
+              Icons.format_align_left_rounded,
+              'Align',
+              _cycleAlignment,
+            ),
+            _pinTool(
+              Icons.format_list_bulleted_rounded,
+              'Bullets',
+              () => _toggle(Attribute.ul),
+              active: _isActive(Attribute.ul),
+            ),
+            _pinTool(
+              Icons.format_list_numbered_rounded,
+              'Number',
+              () => _toggle(Attribute.ol),
+              active: _isActive(Attribute.ol),
+            ),
+            _pinTool(
+              Icons.search_rounded,
+              'Find',
+              _findReplaceDialog,
+            ),
+            _pinTool(
+              Icons.more_horiz_rounded,
+              'More',
+              _showWordRibbon,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _pinTool(
+    IconData icon,
+    String label,
+    VoidCallback? onTap, {
+    bool active = false,
+  }) {
+    final enabled = onTap != null;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(7),
+      child: Container(
+        margin: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: active
+              ? const Color(0xFFE7F0FF)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          border: active
+              ? Border.all(color: const Color(0xFF8EB8F2))
+              : null,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 19,
+              color: enabled
+                  ? wordBlue
+                  : Colors.black26,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: enabled
+                    ? Colors.black76
+                    : Colors.black26,
+                fontSize: 8.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final title = widget.path == null
@@ -1807,7 +1962,19 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
             icon: const Icon(Icons.keyboard_rounded, size: 21),
           ),
           IconButton(
-            tooltip: 'Document tools',
+            tooltip: _toolsPinned ? 'Unpin tools' : 'Pin tools',
+            onPressed: () {
+              setState(() => _toolsPinned = !_toolsPinned);
+            },
+            icon: Icon(
+              _toolsPinned
+                  ? Icons.push_pin_rounded
+                  : Icons.push_pin_outlined,
+              size: 21,
+            ),
+          ),
+          IconButton(
+            tooltip: 'All document tools',
             onPressed: _showWordRibbon,
             icon: const Icon(Icons.text_format_rounded, size: 21),
           ),
@@ -1864,6 +2031,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
                     ),
                   ),
                 Expanded(child: _documentCanvas()),
+                if (_toolsPinned) _pinnedToolsBar(),
                 Container(
                   height: 34,
                   color: wordBlueDark,
