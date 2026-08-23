@@ -1101,7 +1101,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
         _Cmd(Icons.waving_hand_outlined, 'Greeting Line', () => _coming('Greeting Line')),
         _Cmd(Icons.data_object_rounded, 'Insert Merge Field', () => _coming('Insert Merge Field')),
         _Cmd(Icons.rule_rounded, 'Rules', () => _coming('Mail Merge Rules')),
-        _Cmd(Icons.match_word_rounded, 'Match Fields', () => _coming('Match Fields')),
+        _Cmd(Icons.rule_rounded, 'Match Fields', () => _coming('Match Fields')),
         _Cmd(Icons.label_important_outline_rounded, 'Update Labels', () => _coming('Update Labels')),
       ]),
       _sectionTitle('Preview Results'),
@@ -1419,7 +1419,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
             borderRadius: BorderRadius.circular(12),
             onTap: () {
               final hex =
-                  '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+                  '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
               _setAttr(Attribute.color.key, hex);
               refresh();
             },
