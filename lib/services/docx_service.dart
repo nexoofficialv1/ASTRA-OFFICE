@@ -29,7 +29,6 @@ class DocxService {
     for (final node in bodyChildren) {
       if (node is XmlElement && node.name.qualified == 'w:p') node.remove();
     }
-    final ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
     final lines = text.split('\n');
     for (final line in lines.reversed) {
       final p = XmlElement(XmlName('w:p'), [], [

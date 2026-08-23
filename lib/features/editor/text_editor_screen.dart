@@ -41,6 +41,7 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
     final defaultName = widget.isDocx ? 'Document.docx' : 'Document.txt';
     final path = await FilePicker.platform.saveFile(dialogTitle: 'Save as', fileName: defaultName);
     if (path == null) return;
+    if (!mounted) return;
     if (widget.isDocx) {
       if (_sourcePath == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('New DOCX package creation is scheduled for Phase 1.1. Save as TXT for now.')));
