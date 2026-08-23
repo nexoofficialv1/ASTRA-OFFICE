@@ -12,6 +12,7 @@ jobs:
         with:
           channel: stable
       - run: flutter create . --platforms=android --org com.astra.office --project-name astra_office
+      - run: rm -rf test
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
