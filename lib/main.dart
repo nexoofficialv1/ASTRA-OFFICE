@@ -11,13 +11,21 @@ class AstraOfficeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const seed = Color(0xFF247BFF);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'ASTRA OFFICE',
-      theme: ThemeData(
+      themeMode: ThemeMode.dark,
+      darkTheme: ThemeData(
         useMaterial3: true,
-        colorSchemeSeed: const Color(0xFF3559E0),
-        scaffoldBackgroundColor: const Color(0xFFF7F8FC),
+        brightness: Brightness.dark,
+        colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
+        scaffoldBackgroundColor: const Color(0xFF06152F),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF071A38),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
       ),
       home: const HomeScreen(),
     );
